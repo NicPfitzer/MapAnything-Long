@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import subprocess
@@ -11,6 +12,8 @@ import numpy as np
 
 from mapanything.utils.colmap import get_camera_matrix, qvec2rotmat, read_model
 from mapanything.utils.geometry import closed_form_pose_inverse
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
