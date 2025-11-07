@@ -1,30 +1,36 @@
 #!/bin/bash
+set -euo pipefail
 
-mkdir weights
+mkdir -p weights
 cd ./weights
 
-# SALAD (~ 350 MiB)
+# SALAD (~350 MiB)
 echo "Downloading SALAD weights..."
 SALAD_URL="https://github.com/serizba/salad/releases/download/v1.0.0/dino_salad.ckpt"
 curl -L "$SALAD_URL" -o "./dino_salad.ckpt"
 
-# DINO (~ 340 MiB)
+# DINOv2 (~340 MiB)
 echo "Downloading DINO weights..."
 wget https://dl.fbaipublicfiles.com/dinov2/dinov2_vitb14/dinov2_vitb14_pretrain.pth
 
-# DBoW (~ 40 MiB of tar.gz, ~145 MiB of txt)
-echo "Downloading DBoW weights..."
+# DBoW vocabulary (~40 MiB tar.gz, ~145 MiB txt)
+echo "Downloading DBoW vocabulary..."
 (wget https://github.com/UZ-SLAMLab/ORB_SLAM3/raw/master/Vocabulary/ORBvoc.txt.tar.gz) & wait
 tar -xzvf ORBvoc.txt.tar.gz
 rm ORBvoc.txt.tar.gz
 
-# VGGT (~ 5.0 GiB)
-echo "Downloading VGGT weights..."
-VGGT_URL="https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-curl -L "$VGGT_URL" -o "./model.pt"
+# MapAnything (~2.1 GiB)
+MAPANYTHING_DIR="./mapanything"
+mkdir -p "$MAPANYTHING_DIR"
+MAPANYTHING_REPO="https://huggingface.co/facebook/map-anything/resolve/main"
+echo "Downloading MapAnything config..."
+curl -L "${MAPANYTHING_REPO}/config.json" -o "${MAPANYTHING_DIR}/config.json"
+echo "Downloading MapAnything weights..."
+curl -L "${MAPANYTHING_REPO}/model.safetensors" -o "${MAPANYTHING_DIR}/model.safetensors"
 
-# you will see 4 files under `./weights` when finished
-# - model.pt
-# - dino_salad.ckpt             
-# - dinov2_vitb14_pretrain.pth  
-# - ORBvoc.txt
+echo "Done. You should now have the following files in ./weights:"
+echo " - dino_salad.ckpt"
+echo " - dinov2_vitb14_pretrain.pth"
+echo " - ORBvoc.txt"
+echo " - mapanything/config.json"
+echo " - mapanything/model.safetensors"

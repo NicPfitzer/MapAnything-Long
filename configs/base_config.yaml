@@ -1,4 +1,5 @@
 Weights:
+  MapAnything: './weights/mapanything'
   VGGT: './weights/model.pt'
   DBoW: './weights/ORBvoc.txt'
   SALAD: './weights/dino_salad.ckpt'
