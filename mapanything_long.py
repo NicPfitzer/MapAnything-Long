@@ -107,7 +107,27 @@ class MapAnything_Long:
         print('Loading MapAnything model...')
 
         weights_cfg = self.config.get('Weights', {})
-        self.mapanything_model_name = weights_cfg.get('MapAnything', 'facebook/map-anything')
+        default_hf_repo = 'facebook/map-anything'
+        configured_mapanything = weights_cfg.get('MapAnything', default_hf_repo)
+        expanded_path = os.path.expanduser(configured_mapanything)
+        is_path_like = (
+            configured_mapanything.startswith(('.', '/', '~'))
+            or os.path.sep in configured_mapanything
+        )
+
+        if is_path_like and os.path.isdir(expanded_path):
+            mapanything_source = os.path.abspath(expanded_path)
+            print(f"Loading MapAnything from local directory: {mapanything_source}")
+        elif is_path_like:
+            print(
+                f"Warning: Local MapAnything path '{configured_mapanything}' not found. "
+                f"Falling back to HuggingFace repo '{default_hf_repo}'."
+            )
+            mapanything_source = default_hf_repo
+        else:
+            mapanything_source = configured_mapanything
+
+        self.mapanything_model_name = mapanything_source
         try:
             self.model = MapAnything.from_pretrained(self.mapanything_model_name).to(self.device).eval()
         except Exception as exc:
