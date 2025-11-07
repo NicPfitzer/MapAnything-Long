@@ -345,7 +345,6 @@ class MapAnything_Long:
                     "img": np.array(img_rgb),
                     "idx": idx,
                     "instance": os.path.basename(path),
-                    "image_path": path,
                 }
             intrinsics = self._lookup_intrinsics(path)
             if intrinsics is not None:
