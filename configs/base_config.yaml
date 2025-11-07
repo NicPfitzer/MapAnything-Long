@@ -26,7 +26,7 @@ Model:
 
   Pointcloud_Save:
     sample_ratio: 0.045
-    conf_threshold_coef: 0.2 # conf_threshold = np.mean(confs) * conf_threshold_coef
+    conf_threshold_coef: 0.25 # conf_threshold = np.mean(confs) * conf_threshold_coef
 
 Loop:
   DBoW:
@@ -51,4 +51,4 @@ Loop:
 Camera:
   intrinsics:
     json_path: null        # Optional JSON mapping: {"frame0001.png": [[fx, 0, cx], [0, fy, cy], [0,0,1]], "_default": [[...]]}
-    default: [1500, 1500, 2016, 1512]       # Optional inline default intrinsic matrix or [fx, fy, cx, cy] list when json_path is not provided
+    default: null # [1500, 1500, 2016, 1512]       # Optional inline default intrinsic matrix or [fx, fy, cx, cy] list when json_path is not provided
