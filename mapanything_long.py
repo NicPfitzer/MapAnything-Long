@@ -254,15 +254,18 @@ class MapAnything_Long:
 
     def process_single_chunk(self, range_1, chunk_idx=None, range_2=None, is_loop=False):
         start_idx, end_idx = range_1
-        chunk_image_paths = self.img_list[start_idx:end_idx]
+        chunk_image_paths = list(self.img_list[start_idx:end_idx])
+        chunk_image_indices = list(range(start_idx, end_idx))
         if range_2 is not None:
-            start_idx, end_idx = range_2
-            chunk_image_paths += self.img_list[start_idx:end_idx]
+            start_idx2, end_idx2 = range_2
+            chunk_image_paths += self.img_list[start_idx2:end_idx2]
+            chunk_image_indices += list(range(start_idx2, end_idx2))
 
         colmap_chunk = self._build_colmap_chunk_name(chunk_idx, range_1, range_2, is_loop)
         colmap_views = self._maybe_run_colmap(chunk_image_paths, colmap_chunk)
-        views = self._prepare_views(
+        views, kept_indices = self._prepare_views(
             chunk_image_paths,
+            image_indices=chunk_image_indices,
             colmap_views=colmap_views,
             chunk_name=colmap_chunk,
         )
@@ -287,10 +290,9 @@ class MapAnything_Long:
 
         save_path = os.path.join(save_dir, filename)
 
-        if not is_loop and range_2 is None:
+        if not is_loop and range_2 is None and kept_indices:
             extrinsics = chunk_predictions['camera_poses']
-            chunk_range = self.chunk_indices[chunk_idx]
-            self.all_camera_poses.append((chunk_range, extrinsics))
+            self.all_camera_poses.append((kept_indices, extrinsics))
 
         np.save(save_path, chunk_predictions)
 
@@ -402,7 +404,7 @@ class MapAnything_Long:
             )
         return result.registered_views
 
-    def _prepare_views(self, image_paths, colmap_views=None, chunk_name=None):
+    def _prepare_views(self, image_paths, image_indices=None, colmap_views=None, chunk_name=None):
         colmap_views = colmap_views or {}
         raw_views = []
         for idx, path in enumerate(image_paths):
@@ -413,6 +415,8 @@ class MapAnything_Long:
                     "idx": idx,
                     "instance": os.path.basename(path),
                 }
+            if image_indices is not None and idx < len(image_indices):
+                raw_view["global_idx"] = image_indices[idx]
             abs_path = os.path.abspath(path)
             colmap_view = colmap_views.get(abs_path)
             if colmap_view is not None:
@@ -440,8 +444,11 @@ class MapAnything_Long:
             raw_views = [view for view in raw_views if "camera_poses" in view]
             for new_idx, view in enumerate(raw_views):
                 view["idx"] = new_idx
+        kept_indices = [
+            view.get("global_idx", view["idx"]) for view in raw_views
+        ]
 
-        return preprocess_inputs(
+        processed_views = preprocess_inputs(
             raw_views,
             resize_mode=self.image_resize_mode,
             size=self.image_resize_size,
@@ -450,6 +457,11 @@ class MapAnything_Long:
             resolution_set=self.image_resolution_set,
             verbose=False,
         )
+        for proc_view, raw_view in zip(processed_views, raw_views):
+            if "global_idx" in raw_view:
+                proc_view["global_idx"] = raw_view["global_idx"]
+
+        return processed_views, kept_indices
 
     def _prepare_chunk_predictions(self, outputs):
         points, confs, images = [], [], []
@@ -747,35 +759,36 @@ class MapAnything_Long:
         
         all_poses = [None] * len(self.img_list)
         
-        first_chunk_range, first_chunk_extrinsics = self.all_camera_poses[0]
-        for i, idx in enumerate(range(first_chunk_range[0], first_chunk_range[1])):
-
-            c2w = first_chunk_extrinsics[i] # camera pose of MapAnything is C2W while it is W2C in VGGT!
+        first_chunk_indices, first_chunk_extrinsics = self.all_camera_poses[0]
+        for idx, c2w in zip(first_chunk_indices, first_chunk_extrinsics):
             all_poses[idx] = c2w
 
         for chunk_idx in range(1, len(self.all_camera_poses)):
-            chunk_range, chunk_extrinsics = self.all_camera_poses[chunk_idx]
+            chunk_indices, chunk_extrinsics = self.all_camera_poses[chunk_idx]
             s, R, t = self.sim3_list[chunk_idx-1]   # When call self.save_camera_poses(), all the sim3 are aligned to the first chunk.
             
             S = np.eye(4)
             S[:3, :3] = s * R
             S[:3, 3] = t
 
-            for i, idx in enumerate(range(chunk_range[0], chunk_range[1])):
-
-                c2w = chunk_extrinsics[i] # camera pose of MapAnything is C2W while it is W2C in VGGT!
-
+            for idx, c2w in zip(chunk_indices, chunk_extrinsics):
                 transformed_c2w = S @ c2w  # Be aware of the left multiplication!
-
                 all_poses[idx] = transformed_c2w
 
         poses_path = os.path.join(self.output_dir, 'camera_poses.txt')
+        missing_pose_indices = []
         with open(poses_path, 'w') as f:
-            for pose in all_poses:
-                flat_pose = pose.flatten()
-                f.write(' '.join([str(x) for x in flat_pose]) + '\n')
+                for idx, pose in enumerate(all_poses):
+                    if pose is None:
+                        missing_pose_indices.append(idx)
+                        f.write(' '.join(['nan'] * 16) + '\n')
+                        continue
+                    flat_pose = pose.flatten()
+                    f.write(' '.join([str(x) for x in flat_pose]) + '\n')
         
         print(f"Camera poses saved to {poses_path}")
+        if missing_pose_indices:
+            print(f"Warning: Missing poses for {len(missing_pose_indices)} image(s): {missing_pose_indices[:10]}{'...' if len(missing_pose_indices) > 10 else ''}")
         
         ply_path = os.path.join(self.output_dir, 'camera_poses.ply')
         with open(ply_path, 'w') as f:
@@ -793,6 +806,8 @@ class MapAnything_Long:
             
             color = chunk_colors[0]
             for pose in all_poses:
+                if pose is None:
+                    continue
                 position = pose[:3, 3]
                 f.write(f'{position[0]} {position[1]} {position[2]} {color[0]} {color[1]} {color[2]}\n')
         
