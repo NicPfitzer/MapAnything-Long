@@ -261,7 +261,11 @@ class MapAnything_Long:
 
         colmap_chunk = self._build_colmap_chunk_name(chunk_idx, range_1, range_2, is_loop)
         colmap_views = self._maybe_run_colmap(chunk_image_paths, colmap_chunk)
-        views = self._prepare_views(chunk_image_paths, colmap_views=colmap_views)
+        views = self._prepare_views(
+            chunk_image_paths,
+            colmap_views=colmap_views,
+            chunk_name=colmap_chunk,
+        )
         print(f"Loaded {len(views)} images")
 
         torch.cuda.empty_cache()
@@ -398,7 +402,7 @@ class MapAnything_Long:
             )
         return result.registered_views
 
-    def _prepare_views(self, image_paths, colmap_views=None):
+    def _prepare_views(self, image_paths, colmap_views=None, chunk_name=None):
         colmap_views = colmap_views or {}
         raw_views = []
         for idx, path in enumerate(image_paths):
@@ -421,6 +425,21 @@ class MapAnything_Long:
                     raw_view["intrinsics"] = intrinsics
                     print(f"[Intrinsics] {os.path.basename(path)} ->\n{intrinsics}")
             raw_views.append(raw_view)
+
+        has_pose = [("camera_poses" in view) for view in raw_views]
+        pose_count = sum(has_pose)
+        if pose_count > 0 and pose_count < len(raw_views):
+            dropped = len(raw_views) - pose_count
+            warnings.warn(
+                (
+                    f"COLMAP produced poses for {pose_count}/{len(raw_views)} views "
+                    f"in chunk '{chunk_name or 'N/A'}'. Dropping {dropped} unposed "
+                    "view(s) so MapAnything receives a consistent posed batch."
+                )
+            )
+            raw_views = [view for view in raw_views if "camera_poses" in view]
+            for new_idx, view in enumerate(raw_views):
+                view["idx"] = new_idx
 
         return preprocess_inputs(
             raw_views,
