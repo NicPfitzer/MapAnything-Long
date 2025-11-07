@@ -414,7 +414,7 @@ class MapAnything_Long:
             if colmap_view is not None:
                 raw_view["intrinsics"] = colmap_view.intrinsics.copy()
                 raw_view["camera_poses"] = colmap_view.pose.copy()
-                raw_view["is_metric_scale"] = np.array([False])
+                raw_view["is_metric_scale"] = torch.tensor([False])
             else:
                 intrinsics = self._lookup_intrinsics(path)
                 if intrinsics is not None:
