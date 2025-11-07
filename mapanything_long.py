@@ -349,6 +349,7 @@ class MapAnything_Long:
             intrinsics = self._lookup_intrinsics(path)
             if intrinsics is not None:
                 raw_view["intrinsics"] = intrinsics
+                print(f"[Intrinsics] {os.path.basename(path)} ->\n{intrinsics}")
             raw_views.append(raw_view)
 
         return preprocess_inputs(
