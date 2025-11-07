@@ -661,6 +661,7 @@ def preprocess_inputs(
                 "intrinsics",
                 "ray_directions",
                 "camera_poses",
+                "global_idx",
             ]:
                 processed_view[key] = value
 

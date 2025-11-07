@@ -457,10 +457,6 @@ class MapAnything_Long:
             resolution_set=self.image_resolution_set,
             verbose=False,
         )
-        for proc_view, raw_view in zip(processed_views, raw_views):
-            if "global_idx" in raw_view:
-                proc_view["global_idx"] = raw_view["global_idx"]
-
         return processed_views, kept_indices
 
     def _prepare_chunk_predictions(self, outputs):
