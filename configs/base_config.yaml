@@ -47,3 +47,8 @@ Loop:
     # choose between 'cpp' or 'python'. will auto set 'python' if c++ version has not installed
     max_iterations: 30
     lambda_init: 1e-6
+
+Camera:
+  intrinsics:
+    json_path: null        # Optional JSON mapping: {"frame0001.png": [[fx, 0, cx], [0, fy, cy], [0,0,1]], "_default": [[...]]}
+    default: [6060.0, 6060.0, 4032.0, 3024.0]          # Optional inline default intrinsic matrix or [fx, fy, cx, cy] list when json_path is not provided

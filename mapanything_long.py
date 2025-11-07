@@ -1,8 +1,10 @@
 import argparse
 import glob
+import json
 import os
 import sys
 import threading
+import warnings
 import gc
 from datetime import datetime
 
@@ -23,7 +25,7 @@ matplotlib.use('Agg')
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     
 from mapanything.models import MapAnything
-from mapanything.utils.image import load_images as load_mapanything_images
+from mapanything.utils.image import preprocess_inputs
 
 from loop_utils.sim3loop import Sim3LoopOptimizer
 from loop_utils.sim3utils import *
@@ -60,8 +62,13 @@ class LongSeqResult:
         self.all_camera_poses = []
 
 class MapAnything_Long:
-    def __init__(self, image_dir, save_dir, config):
+    def __init__(self, image_dir, save_dir, config, config_path=None):
         self.config = config
+        self.config_dir = (
+            os.path.dirname(os.path.abspath(config_path))
+            if config_path is not None
+            else os.getcwd()
+        )
 
         self.chunk_size = self.config['Model']['chunk_size']
         self.overlap = self.config['Model']['overlap']
@@ -82,6 +89,23 @@ class MapAnything_Long:
         self.sky_mask = False
         self.useDBoW = self.config['Model']['useDBoW']
         self.memory_efficient_inference = self.config['Model'].get('memory_efficient_inference', False)
+        self.image_resize_mode = self.config['Model'].get('image_resize_mode', 'fixed_mapping')
+        self.image_resize_size = self.config['Model'].get('image_resize_size')
+        self.image_resolution_set = self.config['Model'].get('image_resolution_set', 518)
+        self.image_norm_type = self.config['Model'].get('image_norm_type', 'dinov2')
+        self.image_patch_size = self.config['Model'].get('image_patch_size', 14)
+        camera_cfg = self.config.get('Camera') or {}
+        intrinsics_cfg = camera_cfg.get('intrinsics') or {}
+        self._intrinsics_map = {}
+        self._default_intrinsics = self._parse_intrinsics_matrix(
+            intrinsics_cfg.get('default')
+        )
+        json_path = intrinsics_cfg.get('json_path')
+        if json_path:
+            self._load_intrinsics_mapping(json_path)
+        self._use_intrinsics = bool(self._intrinsics_map) or (
+            self._default_intrinsics is not None
+        )
 
         self.img_dir = image_dir
         self.img_list = None
@@ -194,7 +218,7 @@ class MapAnything_Long:
             start_idx, end_idx = range_2
             chunk_image_paths += self.img_list[start_idx:end_idx]
 
-        views = load_mapanything_images(chunk_image_paths)
+        views = self._prepare_views(chunk_image_paths)
         print(f"Loaded {len(views)} images")
 
         torch.cuda.empty_cache()
@@ -241,6 +265,102 @@ class MapAnything_Long:
     @staticmethod
     def _as_float32(array):
         return np.ascontiguousarray(array.astype(np.float32, copy=False))
+
+    def _resolve_path(self, path):
+        if path is None:
+            return None
+        expanded = os.path.expanduser(path)
+        if os.path.isabs(expanded):
+            return expanded
+        candidate = os.path.join(self.config_dir, expanded)
+        if os.path.exists(candidate):
+            return candidate
+        return os.path.abspath(expanded)
+
+    @staticmethod
+    def _normalize_intrinsics_key(key):
+        return key.replace("\\", "/")
+
+    @staticmethod
+    def _parse_intrinsics_matrix(value):
+        if value is None:
+            return None
+        arr = np.asarray(value, dtype=np.float32)
+        if arr.shape == (3, 3):
+            return arr
+        flat = arr.flatten()
+        if flat.size == 4:
+            fx, fy, cx, cy = flat
+            return np.array(
+                [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float32
+            )
+        raise ValueError(
+            f"Intrinsics must be 3x3 matrix or [fx, fy, cx, cy] list, got shape {arr.shape}"
+        )
+
+    def _load_intrinsics_mapping(self, path):
+        resolved = self._resolve_path(path)
+        if not os.path.isfile(resolved):
+            warnings.warn(f"Intrinsics json_path '{path}' not found. Skipping.")
+            return
+        with open(resolved, 'r') as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"Intrinsics file '{resolved}' must contain a JSON object mapping image keys to matrices."
+            )
+        for key, value in data.items():
+            matrix = self._parse_intrinsics_matrix(value)
+            if matrix is None:
+                continue
+            if key == "_default":
+                self._default_intrinsics = matrix
+            else:
+                normalized_key = self._normalize_intrinsics_key(key)
+                self._intrinsics_map[normalized_key] = matrix
+
+    def _lookup_intrinsics(self, image_path):
+        if not self._use_intrinsics:
+            return None
+        candidates = [
+            self._normalize_intrinsics_key(image_path),
+            self._normalize_intrinsics_key(
+                os.path.relpath(image_path, self.img_dir)
+            ),
+            os.path.basename(image_path),
+        ]
+        for key in candidates:
+            if key in self._intrinsics_map:
+                return self._intrinsics_map[key].copy()
+        if self._default_intrinsics is not None:
+            return self._default_intrinsics.copy()
+        return None
+
+    def _prepare_views(self, image_paths):
+        raw_views = []
+        for idx, path in enumerate(image_paths):
+            with Image.open(path) as img:
+                img_rgb = img.convert('RGB')
+                raw_view = {
+                    "img": np.array(img_rgb),
+                    "idx": idx,
+                    "instance": os.path.basename(path),
+                    "image_path": path,
+                }
+            intrinsics = self._lookup_intrinsics(path)
+            if intrinsics is not None:
+                raw_view["intrinsics"] = intrinsics
+            raw_views.append(raw_view)
+
+        return preprocess_inputs(
+            raw_views,
+            resize_mode=self.image_resize_mode,
+            size=self.image_resize_size,
+            norm_type=self.image_norm_type,
+            patch_size=self.image_patch_size,
+            resolution_set=self.image_resolution_set,
+            verbose=False,
+        )
 
     def _prepare_chunk_predictions(self, outputs):
         points, confs, images = [], [], []
@@ -682,7 +802,7 @@ if __name__ == '__main__':
     if config['Model']['align_method'] == 'numba':
         warmup_numba()
 
-    mapanything_long = MapAnything_Long(image_dir, save_dir, config)
+    mapanything_long = MapAnything_Long(image_dir, save_dir, config, config_path=args.config)
     mapanything_long.run()
     mapanything_long.close()
 
