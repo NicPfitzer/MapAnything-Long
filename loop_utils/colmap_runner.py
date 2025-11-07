@@ -128,6 +128,10 @@ class ColmapRunner:
         registered: Dict[str, ColmapView] = {}
         unregistered = list(abs_paths)
         sparse_model_path = None
+        self._log(
+            f"[COLMAP] Starting chunk '{chunk_name}' with {len(abs_paths)} image(s) "
+            f"(workspace: {chunk_dir})"
+        )
 
         if len(mapping) >= 2:
             database_path = os.path.join(chunk_dir, "colmap.db")
@@ -139,7 +143,8 @@ class ColmapRunner:
             registered, unregistered = self._parse_model(sparse_model_path, mapping)
         else:
             self._log(
-                f"Skipping COLMAP for chunk '{chunk_name}' because it only has {len(mapping)} image(s)."
+                f"Skipping COLMAP for chunk '{chunk_name}' because it only has {len(mapping)} image(s).",
+                level="warning",
             )
 
         if not self.keep_workspaces:
@@ -195,7 +200,9 @@ class ColmapRunner:
         ]
         if self.max_image_size:
             cmd += ["--SiftExtraction.max_image_size", str(self.max_image_size)]
+        self._log("[COLMAP] Running feature extraction...")
         self._run_command(cmd, cwd=os.path.dirname(database_path))
+        self._log("[COLMAP] Feature extraction complete.")
 
     def _run_matcher(self, database_path: str) -> None:
         matcher_command = (
@@ -211,7 +218,9 @@ class ColmapRunner:
         ]
         if self.matcher == "sequential" and self.sequential_overlap is not None:
             cmd += ["--SequentialMatching.overlap", str(self.sequential_overlap)]
+        self._log(f"[COLMAP] Running {matcher_command.replace('_', ' ')}...")
         self._run_command(cmd, cwd=os.path.dirname(database_path))
+        self._log("[COLMAP] Matching complete.")
 
     def _run_mapper(
         self, database_path: str, images_dir: str, sparse_dir: str
@@ -234,7 +243,9 @@ class ColmapRunner:
         ]
         if self.num_threads:
             cmd += ["--Mapper.num_threads", str(self.num_threads)]
+        self._log("[COLMAP] Running sparse mapper...")
         self._run_command(cmd, cwd=os.path.dirname(database_path))
+        self._log("[COLMAP] Mapper complete.")
         candidates = [
             os.path.join(sparse_dir, d)
             for d in sorted(os.listdir(sparse_dir))
@@ -271,6 +282,11 @@ class ColmapRunner:
         unregistered = [
             original for original in mapping.values() if original not in per_image
         ]
+        if unregistered:
+            self._log(
+                f"[COLMAP] {len(unregistered)} image(s) were not registered in the sparse model.",
+                level="warning",
+            )
         return per_image, unregistered
 
     def _cleanup_workspace(self, chunk_dir: str) -> None:
@@ -290,6 +306,8 @@ class ColmapRunner:
         except FileNotFoundError as exc:
             raise RuntimeError(f"Failed to execute '{cmd[0]}': {exc}") from exc
 
-    def _log(self, message: str) -> None:
+    def _log(self, message: str, level: str = "info") -> None:
+        log_fn = getattr(logger, level, logger.info)
+        log_fn(message)
         if self.verbose:
             print(message)
