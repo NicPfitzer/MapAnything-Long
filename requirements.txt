@@ -17,3 +17,15 @@ prettytable
 pytorch-lightning
 pytorch-metric-learning
 torchmetrics
+hydra-core
+natsort
+opencv-python-headless==4.10.0.84
+orjson
+pillow-heif
+plyfile
+python-box
+rerun-sdk~=0.24.1
+tensorboard
+tqdm
+trimesh
+uniception
