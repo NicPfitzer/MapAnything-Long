@@ -59,7 +59,7 @@ COLMAP:
   workspace_root: './_tmp_colmap'
   matcher: 'sequential'    # 'sequential' or 'exhaustive'
   sequential_overlap: 5
-  use_gpu: True
+  use_gpu: False
   camera_model: 'SIMPLE_RADIAL'
   single_camera: True
   max_image_size: 2048
