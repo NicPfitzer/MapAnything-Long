@@ -297,8 +297,10 @@ class ColmapRunner:
 
     def _run_command(self, cmd, cwd: str) -> None:
         self._log("Running: " + " ".join(cmd))
+        env = os.environ.copy()
+        env.setdefault("QT_QPA_PLATFORM", "offscreen")
         try:
-            subprocess.run(cmd, cwd=cwd, check=True)
+            subprocess.run(cmd, cwd=cwd, env=env, check=True)
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
                 f"COLMAP command '{' '.join(cmd)}' failed with exit code {exc.returncode}"
