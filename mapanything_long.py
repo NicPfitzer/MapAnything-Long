@@ -29,7 +29,7 @@ from mapanything.utils.image import preprocess_inputs
 
 from loop_utils.sim3loop import Sim3LoopOptimizer
 from loop_utils.sim3utils import *
-
+from loop_utils.colmap_runner import ColmapRunner
 from loop_utils.config_utils import load_config
 
 def remove_duplicates(data_list):
@@ -74,6 +74,7 @@ class MapAnything_Long:
         self.overlap = self.config['Model']['overlap']
         self.conf_threshold = 1.5
         self.seed = 42
+        self.memory_efficient_inference = self.config['Model'].get('memory_efficient_inference', False)
         if torch.cuda.is_available():
             self.device = "cuda"
             major_cc = torch.cuda.get_device_capability()[0]
@@ -86,9 +87,16 @@ class MapAnything_Long:
             self.amp_dtype = "bf16" if torch.cuda.is_bf16_supported() else "fp16"
         else:
             self.amp_dtype = "fp32"
+        self.model_infer_options = {
+            "memory_efficient_inference": self.memory_efficient_inference,
+            "use_amp": self.use_amp,
+            "amp_dtype": self.amp_dtype,
+            "apply_mask": True,
+            "mask_edges": True,
+            "apply_confidence_mask": False,
+        }
         self.sky_mask = False
         self.useDBoW = self.config['Model']['useDBoW']
-        self.memory_efficient_inference = self.config['Model'].get('memory_efficient_inference', False)
         self.image_resize_mode = self.config['Model'].get('image_resize_mode', 'fixed_mapping')
         self.image_resize_size = self.config['Model'].get('image_resize_size')
         self.image_resolution_set = self.config['Model'].get('image_resolution_set', 518)
@@ -107,14 +115,14 @@ class MapAnything_Long:
             self._default_intrinsics is not None
         )
 
-        self.img_dir = image_dir
+        self.img_dir = os.path.abspath(image_dir)
         self.img_list = None
-        self.output_dir = save_dir
+        self.output_dir = os.path.abspath(save_dir)
 
-        self.result_unaligned_dir = os.path.join(save_dir, '_tmp_results_unaligned')
-        self.result_aligned_dir = os.path.join(save_dir, '_tmp_results_aligned')
-        self.result_loop_dir = os.path.join(save_dir, '_tmp_results_loop')
-        self.pcd_dir = os.path.join(save_dir, 'pcd')
+        self.result_unaligned_dir = os.path.join(self.output_dir, '_tmp_results_unaligned')
+        self.result_aligned_dir = os.path.join(self.output_dir, '_tmp_results_aligned')
+        self.result_loop_dir = os.path.join(self.output_dir, '_tmp_results_loop')
+        self.pcd_dir = os.path.join(self.output_dir, 'pcd')
         os.makedirs(self.result_unaligned_dir, exist_ok=True)
         os.makedirs(self.result_aligned_dir, exist_ok=True)
         os.makedirs(self.result_loop_dir, exist_ok=True)
@@ -175,11 +183,44 @@ class MapAnything_Long:
             if self.useDBoW:
                 self.retrieval = RetrievalDBOW(config=self.config)
             else:
-                loop_info_save_path = os.path.join(save_dir, "loop_closures.txt")
+                loop_info_save_path = os.path.join(self.output_dir, "loop_closures.txt")
                 self.loop_detector = LoopDetector(
-                    image_dir=image_dir,
+                    image_dir=self.img_dir,
                     output=loop_info_save_path,
                     config=self.config
+                )
+
+        colmap_cfg = self.config.get('COLMAP') or {}
+        self.colmap_runner = None
+        colmap_infer_cfg = colmap_cfg.get('infer') or {}
+        if colmap_infer_cfg:
+            self.model_infer_options.update(colmap_infer_cfg)
+        if colmap_cfg.get('enabled'):
+            workspace_root = self._resolve_path(
+                colmap_cfg.get('workspace_root')
+                or os.path.join(self.output_dir, "_colmap_workspaces")
+            )
+            try:
+                self.colmap_runner = ColmapRunner(
+                    workspace_root=workspace_root,
+                    colmap_binary=colmap_cfg.get('binary', 'colmap'),
+                    matcher=colmap_cfg.get('matcher', 'sequential'),
+                    sequential_overlap=colmap_cfg.get('sequential_overlap', 5),
+                    use_gpu=colmap_cfg.get('use_gpu', True),
+                    camera_model=colmap_cfg.get('camera_model', 'SIMPLE_RADIAL'),
+                    single_camera=colmap_cfg.get('single_camera', True),
+                    max_image_size=colmap_cfg.get('max_image_size', 2048),
+                    min_num_matches=colmap_cfg.get('min_num_matches', 15),
+                    num_threads=colmap_cfg.get('num_threads'),
+                    keep_workspaces=colmap_cfg.get('keep_workspaces', False),
+                    verbose=colmap_cfg.get('verbose', False),
+                )
+                print(
+                    f"COLMAP calibration enabled. Intermediate workspaces: {workspace_root}"
+                )
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to initialize COLMAP runner ({exc}). Continuing without COLMAP."
                 )
 
         print('init done.')
@@ -218,18 +259,15 @@ class MapAnything_Long:
             start_idx, end_idx = range_2
             chunk_image_paths += self.img_list[start_idx:end_idx]
 
-        views = self._prepare_views(chunk_image_paths)
+        colmap_chunk = self._build_colmap_chunk_name(chunk_idx, range_1, range_2, is_loop)
+        colmap_views = self._maybe_run_colmap(chunk_image_paths, colmap_chunk)
+        views = self._prepare_views(chunk_image_paths, colmap_views=colmap_views)
         print(f"Loaded {len(views)} images")
 
         torch.cuda.empty_cache()
         outputs = self.model.infer(
             views,
-            memory_efficient_inference=self.memory_efficient_inference,
-            use_amp=self.use_amp,
-            amp_dtype=self.amp_dtype,
-            apply_mask=True,
-            mask_edges=True,
-            apply_confidence_mask=False,
+            **self.model_infer_options,
         )
         chunk_predictions = self._prepare_chunk_predictions(outputs)
         torch.cuda.empty_cache()
@@ -336,7 +374,32 @@ class MapAnything_Long:
             return self._default_intrinsics.copy()
         return None
 
-    def _prepare_views(self, image_paths):
+    def _build_colmap_chunk_name(self, chunk_idx, range_1, range_2, is_loop):
+        if chunk_idx is not None and not is_loop:
+            return f"chunk_{chunk_idx:04d}"
+        prefix = "loop" if is_loop else "chunk"
+        first = f"{range_1[0]}_{range_1[1]}"
+        if range_2 is not None:
+            second = f"{range_2[0]}_{range_2[1]}"
+            return f"{prefix}_{first}__{second}"
+        return f"{prefix}_{first}"
+
+    def _maybe_run_colmap(self, image_paths, chunk_name):
+        if self.colmap_runner is None or not image_paths:
+            return None
+        try:
+            result = self.colmap_runner.run_for_chunk(image_paths, chunk_name=chunk_name)
+        except Exception as exc:
+            warnings.warn(f"COLMAP failed for {chunk_name}: {exc}")
+            return None
+        if result.unregistered_paths:
+            print(
+                f"[COLMAP] {len(result.unregistered_paths)}/{len(image_paths)} images missing poses for {chunk_name}."
+            )
+        return result.registered_views
+
+    def _prepare_views(self, image_paths, colmap_views=None):
+        colmap_views = colmap_views or {}
         raw_views = []
         for idx, path in enumerate(image_paths):
             with Image.open(path) as img:
@@ -346,10 +409,17 @@ class MapAnything_Long:
                     "idx": idx,
                     "instance": os.path.basename(path),
                 }
-            intrinsics = self._lookup_intrinsics(path)
-            if intrinsics is not None:
-                raw_view["intrinsics"] = intrinsics
-                print(f"[Intrinsics] {os.path.basename(path)} ->\n{intrinsics}")
+            abs_path = os.path.abspath(path)
+            colmap_view = colmap_views.get(abs_path)
+            if colmap_view is not None:
+                raw_view["intrinsics"] = colmap_view.intrinsics.copy()
+                raw_view["camera_poses"] = colmap_view.pose.copy()
+                raw_view["is_metric_scale"] = np.array([False])
+            else:
+                intrinsics = self._lookup_intrinsics(path)
+                if intrinsics is not None:
+                    raw_view["intrinsics"] = intrinsics
+                    print(f"[Intrinsics] {os.path.basename(path)} ->\n{intrinsics}")
             raw_views.append(raw_view)
 
         return preprocess_inputs(
@@ -621,6 +691,7 @@ class MapAnything_Long:
         # print(self.img_list)
         if len(self.img_list) == 0:
             raise ValueError(f"[DIR EMPTY] No images found in {self.img_dir}!")
+        self.img_list = [os.path.abspath(path) for path in self.img_list]
         print(f"Found {len(self.img_list)} images")
 
         if self.loop_enable:

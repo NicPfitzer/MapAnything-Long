@@ -52,3 +52,24 @@ Camera:
   intrinsics:
     json_path: null        # Optional JSON mapping: {"frame0001.png": [[fx, 0, cx], [0, fy, cy], [0,0,1]], "_default": [[...]]}
     default: null # [1500, 1500, 2016, 1512]       # Optional inline default intrinsic matrix or [fx, fy, cx, cy] list when json_path is not provided
+
+COLMAP:
+  enabled: False
+  binary: 'colmap'
+  workspace_root: './_tmp_colmap'
+  matcher: 'sequential'    # 'sequential' or 'exhaustive'
+  sequential_overlap: 5
+  use_gpu: True
+  camera_model: 'SIMPLE_RADIAL'
+  single_camera: True
+  max_image_size: 2048
+  min_num_matches: 15
+  num_threads: null
+  keep_workspaces: False
+  verbose: False
+  infer:
+    ignore_calibration_inputs: False
+    ignore_depth_inputs: True
+    ignore_pose_inputs: False
+    ignore_depth_scale_inputs: True
+    ignore_pose_scale_inputs: True
