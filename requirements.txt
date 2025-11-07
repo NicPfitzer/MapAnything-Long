@@ -24,7 +24,7 @@ orjson
 pillow-heif
 plyfile
 python-box
-rerun-sdk~=0.24.1
+rerun-sdk~=0.23.4
 tensorboard
 tqdm
 trimesh
