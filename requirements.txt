@@ -29,3 +29,4 @@ tensorboard
 tqdm
 trimesh
 uniception
+pypose
