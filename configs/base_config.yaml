@@ -54,7 +54,7 @@ Camera:
     default: null # [1500, 1500, 2016, 1512]       # Optional inline default intrinsic matrix or [fx, fy, cx, cy] list when json_path is not provided
 
 COLMAP:
-  enabled: False
+  enabled: True
   binary: 'colmap'
   workspace_root: './_tmp_colmap'
   matcher: 'exhaustive'    # 'sequential' or 'exhaustive'
