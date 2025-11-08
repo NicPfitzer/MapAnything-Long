@@ -67,7 +67,7 @@ COLMAP:
   num_threads: null
   keep_workspaces: False
   verbose: False
-  log_level: 'detailed'   # 'detailed' or 'summary'
+  log_level: 'summary'   # 'detailed' or 'summary'
   infer:
     ignore_calibration_inputs: False
     ignore_depth_inputs: True
