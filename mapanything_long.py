@@ -214,6 +214,7 @@ class MapAnything_Long:
                     num_threads=colmap_cfg.get('num_threads'),
                     keep_workspaces=colmap_cfg.get('keep_workspaces', False),
                     verbose=colmap_cfg.get('verbose', False),
+                    log_level=colmap_cfg.get('log_level', 'detailed'),
                 )
                 print(
                     f"COLMAP calibration enabled. Intermediate workspaces: {workspace_root}"
