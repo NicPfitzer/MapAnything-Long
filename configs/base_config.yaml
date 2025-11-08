@@ -57,7 +57,7 @@ COLMAP:
   enabled: True
   binary: 'colmap'
   workspace_root: './_tmp_colmap'
-  matcher: 'sequential'    # 'sequential' or 'exhaustive'
+  matcher: 'exhaustive'    # 'sequential' or 'exhaustive'
   sequential_overlap: 5
   use_gpu: False
   camera_model: 'SIMPLE_RADIAL'
