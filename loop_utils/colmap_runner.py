@@ -88,6 +88,9 @@ class ColmapRunner:
         keep_workspaces: bool = False,
         verbose: bool = False,
         log_level: str = "detailed",
+        feature_extractor_args: Optional[Dict[str, object]] = None,
+        matcher_args: Optional[Dict[str, object]] = None,
+        mapper_args: Optional[Dict[str, object]] = None,
     ):
         self.colmap_binary = colmap_binary
         self.matcher = matcher.lower()
@@ -106,6 +109,15 @@ class ColmapRunner:
         if log_level not in {"detailed", "summary"}:
             raise ValueError("log_level must be 'detailed' or 'summary'")
         self.log_level = log_level
+        self.feature_extractor_args = dict(feature_extractor_args or {})
+        self.matcher_args = dict(matcher_args or {})
+        mapper_defaults: Dict[str, object] = {
+            "Mapper.ba_refine_focal_length": 0,
+            "Mapper.ba_refine_principal_point": 0,
+        }
+        if mapper_args:
+            mapper_defaults.update(mapper_args)
+        self.mapper_args = mapper_defaults
         self._chunk_counter = count(0)
         self.workspace_root = (
             os.path.abspath(workspace_root)
@@ -206,6 +218,7 @@ class ColmapRunner:
         ]
         if self.max_image_size:
             cmd += ["--SiftExtraction.max_image_size", str(self.max_image_size)]
+        self._append_colmap_options(cmd, self.feature_extractor_args)
         self._log("[COLMAP] Running feature extraction...", detail=True)
         self._run_command(cmd, cwd=os.path.dirname(database_path))
         self._log("[COLMAP] Feature extraction complete.", detail=True)
@@ -224,6 +237,7 @@ class ColmapRunner:
         ]
         if self.matcher == "sequential" and self.sequential_overlap is not None:
             cmd += ["--SequentialMatching.overlap", str(self.sequential_overlap)]
+        self._append_colmap_options(cmd, self.matcher_args)
         self._log(f"[COLMAP] Running {matcher_command.replace('_', ' ')}...", detail=True)
         self._run_command(cmd, cwd=os.path.dirname(database_path))
         self._log("[COLMAP] Matching complete.", detail=True)
@@ -240,15 +254,12 @@ class ColmapRunner:
             images_dir,
             "--output_path",
             sparse_dir,
-            "--Mapper.ba_refine_focal_length",
-            "0",
-            "--Mapper.ba_refine_principal_point",
-            "0",
             "--Mapper.min_num_matches",
             str(self.min_num_matches),
         ]
         if self.num_threads:
             cmd += ["--Mapper.num_threads", str(self.num_threads)]
+        self._append_colmap_options(cmd, self.mapper_args)
         self._log("[COLMAP] Running sparse mapper...", detail=True)
         self._run_command(cmd, cwd=os.path.dirname(database_path))
         self._log("[COLMAP] Mapper complete.", detail=True)
@@ -300,6 +311,23 @@ class ColmapRunner:
             shutil.rmtree(chunk_dir)
         except OSError as exc:
             warnings.warn(f"Failed to remove COLMAP workspace '{chunk_dir}': {exc}")
+
+    @staticmethod
+    def _format_option_value(value: object) -> str:
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        return str(value)
+
+    @classmethod
+    def _append_colmap_options(
+        cls, cmd: List[str], options: Dict[str, object]
+    ) -> None:
+        if not options:
+            return
+        for key, value in options.items():
+            if value is None:
+                continue
+            cmd.extend([f"--{key}", cls._format_option_value(value)])
 
     def _run_command(self, cmd, cwd: str) -> None:
         self._log("Running: " + " ".join(cmd), detail=True)

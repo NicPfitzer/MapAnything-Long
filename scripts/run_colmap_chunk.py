@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import ast
 import glob
 import json
 import os
 import sys
-from typing import List
+from typing import Dict, List
 
 from loop_utils.colmap_runner import ColmapRunner
 
@@ -95,6 +96,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable verbose logging from the runner.",
     )
+    parser.add_argument(
+        "--feature-option",
+        dest="feature_option",
+        action="append",
+        default=[],
+        help="Additional KEY=VALUE pair for feature_extractor (e.g. SiftExtraction.max_num_features=8000).",
+    )
+    parser.add_argument(
+        "--matcher-option",
+        dest="matcher_option",
+        action="append",
+        default=[],
+        help="Additional KEY=VALUE pair for matcher (e.g. SequentialMatching.overlap=10).",
+    )
+    parser.add_argument(
+        "--mapper-option",
+        dest="mapper_option",
+        action="append",
+        default=[],
+        help="Additional KEY=VALUE pair for mapper (e.g. Mapper.ba_refine_extra_params=1).",
+    )
     return parser.parse_args()
 
 
@@ -123,8 +145,35 @@ def resolve_image_list(spec: str) -> List[str]:
     raise FileNotFoundError(f"Could not resolve any images from '{spec}'.")
 
 
+def parse_option_pairs(pairs: List[str]) -> Dict[str, object]:
+    options: Dict[str, object] = {}
+    for raw in pairs or []:
+        if "=" not in raw:
+            raise ValueError(f"Option '{raw}' must be in KEY=VALUE format.")
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Option '{raw}' has an empty key.")
+        value = value.strip()
+        if not value:
+            raise ValueError(f"Option '{raw}' has an empty value.")
+        try:
+            parsed_value = ast.literal_eval(value)
+        except Exception:
+            parsed_value = value
+        options[key] = parsed_value
+    return options
+
+
 def main() -> None:
     args = parse_args()
+    try:
+        feature_args = parse_option_pairs(args.feature_option)
+        matcher_args = parse_option_pairs(args.matcher_option)
+        mapper_args = parse_option_pairs(args.mapper_option)
+    except ValueError as exc:
+        print(f"Error parsing COLMAP options: {exc}", file=sys.stderr)
+        sys.exit(2)
     image_paths = resolve_image_list(args.images)
     if not image_paths:
         print(f"No images found for '{args.images}'.", file=sys.stderr)
@@ -143,6 +192,9 @@ def main() -> None:
         num_threads=args.num_threads,
         keep_workspaces=args.keep_workspace,
         verbose=args.verbose,
+        feature_extractor_args=feature_args,
+        matcher_args=matcher_args,
+        mapper_args=mapper_args,
     )
     result = runner.run_for_chunk(image_paths, chunk_name=args.chunk_name)
     print(result.summary())

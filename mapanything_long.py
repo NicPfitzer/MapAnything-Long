@@ -215,6 +215,9 @@ class MapAnything_Long:
                     keep_workspaces=colmap_cfg.get('keep_workspaces', False),
                     verbose=colmap_cfg.get('verbose', False),
                     log_level=colmap_cfg.get('log_level', 'detailed'),
+                    feature_extractor_args=colmap_cfg.get('feature_extractor_args'),
+                    matcher_args=colmap_cfg.get('matcher_args'),
+                    mapper_args=colmap_cfg.get('mapper_args'),
                 )
                 print(
                     f"COLMAP calibration enabled. Intermediate workspaces: {workspace_root}"

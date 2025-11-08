@@ -68,6 +68,21 @@ COLMAP:
   keep_workspaces: False
   verbose: False
   log_level: 'summary'   # 'detailed' or 'summary'
+  feature_extractor_args:
+    SiftExtraction.domain_size_pooling: 1
+    SiftExtraction.max_num_features: 8000
+  mapper_args:
+    Mapper.init_min_num_inliers: 20
+    Mapper.init_min_tri_angle: 0.3
+    Mapper.init_max_reg_trials: 1000
+    Mapper.abs_pose_min_num_inliers: 10
+    Mapper.abs_pose_min_inlier_ratio: 0.02
+    Mapper.abs_pose_max_error: 12.0
+    Mapper.filter_max_reproj_error: 10.0
+    Mapper.tri_max_transitivity: 2
+    Mapper.ba_refine_focal_length: 1
+    Mapper.ba_refine_principal_point: 1
+    Mapper.ba_refine_extra_params: 1
   infer:
     ignore_calibration_inputs: False
     ignore_depth_inputs: True
